@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>📊 Encuesta en Vivo con Sockets</title>
+
+  <script src="/socket.io/socket.io.js"></script>
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #0f0f1a;
+      color: #fff;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 20px;
+      overflow-x: hidden;
+    }
+
+    .header { text-align: center; margin-bottom: 30px; }
+    .header h1 { font-size: 2rem; margin-bottom: 5px; }
+    .header .subtitulo { color: #888; font-size: 0.9rem; }
+    .header .badge {
+      display: inline-block;
+      margin-top: 10px;
+      background: #1a1a3e;
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 0.85rem;
+      border: 1px solid #333;
+    }
+    .header .badge .verde { color: #4ade80; font-weight: bold; }
+
+    .contenedor { width: 90%; max-width: 550px; }
+
+    .pregunta {
+      background: #1a1a3e;
+      padding: 25px;
+      border-radius: 14px;
+      text-align: center;
+      margin-bottom: 20px;
+      border: 1px solid #2a2a4e;
+    }
+    .pregunta h2 { font-size: 1.3rem; color: #c4b5fd; }
+    .pregunta .instruccion { color: #888; font-size: 0.85rem; margin-top: 8px; }
+
+    .opciones { display: flex; flex-direction: column; gap: 12px; margin-bottom: 25px; }
+
+    .opcion {
+      background: #1a1a3e;
+      border: 2px solid #2a2a4e;
+      border-radius: 12px;
+      padding: 15px 20px;
+      cursor: pointer;
+      transition: all 0.3s;
+      position: relative;
+      overflow: hidden;
+    }
+    .opcion:hover:not(.votado) { border-color: #7c3aed; transform: translateY(-2px); }
+    .opcion.votado { cursor: default; border-color: #4ade80; background: #0a2a1a; }
+    .opcion.seleccionado { border-color: #4ade80; box-shadow: 0 0 15px rgba(74, 222, 128, 0.2); }
+
+    .opcion-contenido {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      position: relative;
+      z-index: 1;
+    }
+    .opcion-nombre { font-weight: 600; font-size: 1.05rem; }
+    .opcion-votos { color: #a78bfa; font-size: 0.9rem; }
+
+    .opcion-barra {
+      position: absolute;
+      top: 0; left: 0;
+      height: 100%;
+      background: rgba(124, 58, 237, 0.15);
+      transition: width 0.6s ease;
+      border-radius: 10px;
+    }
+    .opcion.seleccionado .opcion-barra { background: rgba(74, 222, 128, 0.15); }
+
+    .opcion-porcentaje {
+      color: #7c3aed;
+      font-weight: bold;
+      font-size: 1.1rem;
+      min-width: 45px;
+      text-align: right;
+    }
+
+    .reacciones {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 30px;
+      flex-wrap: wrap;
+    }
+    .btn-reaccion {
+      font-size: 1.8rem;
+      background: #1a1a3e;
+      border: 2px solid #2a2a4e;
+      border-radius: 12px;
+      padding: 8px 16px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .btn-reaccion:hover { transform: scale(1.2); border-color: #7c3aed; }
+    .btn-reaccion:active { transform: scale(0.95); }
+
+    .emoji-flotante {
+      position: fixed;
+      font-size: 2.5rem;
+      pointer-events: none;
+      animation: flotar 2s ease-out forwards;
+      z-index: 100;
+    }
+    @keyframes flotar {
+      0% { opacity: 1; transform: translateY(0) scale(1); }
+      100% { opacity: 0; transform: translateY(-200px) scale(1.5); }
+    }
+
+    .error {
+      background: #7f1d1d;
+      color: #fca5a5;
+      padding: 10px 20px;
+      border-radius: 10px;
+      text-align: center;
+      margin-bottom: 15px;
+      display: none;
+      animation: shake 0.4s;
+    }
+    @keyframes shake {
+      0%, 100% { transform: translateX(0); }
+      25% { transform: translateX(-8px); }
+      75% { transform: translateX(8px); }
+    }
+
+    .educativo {
+      margin-top: 20px;
+      background: #1a1a3e;
+      border: 1px dashed #444;
+      border-radius: 14px;
+      padding: 20px;
+    }
+    .educativo h3 { color: #c4b5fd; margin-bottom: 12px; font-size: 1rem; }
+    .educativo .concepto { margin-bottom: 8px; font-size: 0.85rem; color: #aaa; }
+    .educativo .concepto code {
+      background: #0f0f1a;
+      padding: 2px 8px;
+      border-radius: 4px;
+      color: #4ade80;
+      font-size: 0.8rem;
+    }
+
+    .total-votos { text-align: center; color: #888; font-size: 0.85rem; margin-bottom: 10px; }
+    .total-votos span { color: #c4b5fd; font-weight: bold; }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>📊 Encuesta en Vivo</h1>
+    <p class="subtitulo">Ejemplo educativo de Socket.IO + Express</p>
+    <div class="badge">
+      🟢 <span class="verde" id="usuarios-conectados">0</span> personas conectadas
+    </div>
+  </div>
+
+  <div class="contenedor">
+
+    <div class="error" id="mensaje-error"></div>
+
+    <div class="pregunta">
+      <h2 id="texto-pregunta">Cargando...</h2>
+      <p class="instruccion">Haz clic en una opción para votar</p>
+    </div>
+
+    <div class="total-votos">
+      Total de votos: <span id="total-votos">0</span>
+    </div>
+
+    <div class="opciones" id="contenedor-opciones"></div>
+
+    <div class="reacciones" id="contenedor-reacciones">
+      <button class="btn-reaccion" data-emoji="👍">👍</button>
+      <button class="btn-reaccion" data-emoji="🔥">🔥</button>
+      <button class="btn-reaccion" data-emoji="❤️">❤️</button>
+      <button class="btn-reaccion" data-emoji="🎉">🎉</button>
+      <button class="btn-reaccion" data-emoji="🤯">🤯</button>
+    </div>
+
+    <div class="educativo">
+      <h3>📚 ¿Qué está pasando detrás de escena?</h3>
+      <div class="concepto">• <code>socket.emit('encuesta:votar')</code> → El cliente envía su voto al servidor</div>
+      <div class="concepto">• <code>io.emit('encuesta:resultado')</code> → El servidor reenvía resultados a TODOS</div>
+      <div class="concepto">• <code>socket.broadcast.emit()</code> → La reacción llega a todos menos al emisor</div>
+      <div class="concepto">• <code>socket.on('evento')</code> → Escuchamos eventos del servidor en tiempo real</div>
+    </div>
+
+  </div>
+
+  <script>
+    const socket = io();
+
+    let yaVoto = false;
+    let opcionElegida = null;
+
+    const textoPregunta = document.getElementById('texto-pregunta');
+    const contenedorOpciones = document.getElementById('contenedor-opciones');
+    const totalVotosEl = document.getElementById('total-votos');
+    const usuariosConectados = document.getElementById('usuarios-conectados');
+    const mensajeError = document.getElementById('mensaje-error');
+
+    socket.on('encuesta:estado', (data) => { renderizarEncuesta(data); });
+    socket.on('encuesta:resultado', (data) => { renderizarEncuesta(data); });
+    socket.on('usuarios:conteo', (cantidad) => { usuariosConectados.textContent = cantidad; });
+    socket.on('encuesta:error', (msg) => {
+      mensajeError.textContent = '⚠️ ' + msg;
+      mensajeError.style.display = 'block';
+      setTimeout(() => { mensajeError.style.display = 'none'; }, 3000);
+    });
+    socket.on('reaccion:mostrar', (emoji) => { crearEmojiFlotante(emoji); });
+
+    document.querySelectorAll('.btn-reaccion').forEach(btn => {
+      btn.addEventListener('click', () => {
+        socket.emit('reaccion:enviar', btn.getAttribute('data-emoji'));
+      });
+    });
+
+    function renderizarEncuesta(data) {
+      textoPregunta.textContent = data.pregunta;
+      const totalVotos = Object.values(data.opciones).reduce((a, b) => a + b, 0);
+      totalVotosEl.textContent = totalVotos;
+      contenedorOpciones.innerHTML = '';
+
+      for (const [nombre, votos] of Object.entries(data.opciones)) {
+        const porcentaje = totalVotos > 0 ? Math.round((votos / totalVotos) * 100) : 0;
+        const div = document.createElement('div');
+        div.classList.add('opcion');
+        if (yaVoto) div.classList.add('votado');
+        if (opcionElegida === nombre) div.classList.add('seleccionado');
+
+        div.innerHTML = `
+          <div class="opcion-barra" style="width: ${porcentaje}%"></div>
+          <div class="opcion-contenido">
+            <span class="opcion-nombre">${nombre}</span>
+            <span class="opcion-votos">${votos} voto${votos !== 1 ? 's' : ''}</span>
+            <span class="opcion-porcentaje">${porcentaje}%</span>
+          </div>
+        `;
+
+        if (!yaVoto) {
+          div.addEventListener('click', () => {
+            yaVoto = true;
+            opcionElegida = nombre;
+            div.classList.add('seleccionado');
+            socket.emit('encuesta:votar', nombre);
+          });
+        }
+
+        contenedorOpciones.appendChild(div);
+      }
+    }
+
+    function crearEmojiFlotante(emoji) {
+      const span = document.createElement('span');
+      span.classList.add('emoji-flotante');
+      span.textContent = emoji;
+      span.style.left = (Math.random() * 80 + 10) + 'vw';
+      span.style.top = (Math.random() * 40 + 40) + 'vh';
+      document.body.appendChild(span);
+      setTimeout(() => span.remove(), 2000);
+    }
+  </script>
+
+</body>
+</html>
